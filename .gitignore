@@ -1,0 +1,7 @@
+.DS_Store
+.venv/
+.env
+config.env
+logs/
+*.keystore
+__pycache__/
