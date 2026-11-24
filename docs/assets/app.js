@@ -4,7 +4,10 @@
    D-day는 브라우저가 KST(UTC+9) 기준으로 매번 계산한다. 담당자명·원문(raw)·첨부파일은 다루지 않는다. */
 (function () {
   "use strict";
-  var TOPICS = ["ISP·ISMP·컨설팅", "AI·데이터", "감리", "구축·개발", "유지보수", "운영·위탁", "회선·인프라"]; // W-3 순서
+  // 주제 칩 표시 순서(v2, 10개). bids.json `topics`가 있으면 그것을 우선 쓴다.
+  var TOPICS_BUILTIN = ["ISP·ISMP·컨설팅", "AI·데이터", "회계·세무자문", "연구용역", "감리", "구축·개발",
+    "유지보수", "운영·위탁", "회선·인프라", "기타"];
+  var TOPICS = TOPICS_BUILTIN;
   var STATUS = [{ id: "all", label: "전체" }, { id: "open", label: "진행 중" }, { id: "closed", label: "마감" }, { id: "rev", label: "취소·정정" }];
   var SECTORS = [
     { name: "정책·국책은행", ids: ["kdb", "ibk", "kexim", "bok"] },
@@ -154,10 +157,19 @@
         s.label + (withCount ? " <i>" + c[s.id] + "</i>" : "") + "</button>";
     }).join("") + "</div>";
   }
-  function topicChips(cur, key) {
+  // list = 현재 기간·상태 필터를 거친 목록. 0건 주제도 칩을 유지하고 건수 0을 표시한다.
+  function topicChips(cur, key, list) {
+    var n = {};
+    (list || []).forEach(function (b) { var t = b.topic || "기타"; n[t] = (n[t] || 0) + 1; });
     return '<div class="chips" role="group" aria-label="주제"><span class="lb">주제</span>' + TOPICS.map(function (t) {
-      return '<button type="button" class="c tap' + (t === cur ? " on" : "") + '" data-act="chip" data-k="' + key + '" data-v="' + esc(t) + '" aria-pressed="' + (t === cur) + '">' + esc(t) + "</button>";
+      return '<button type="button" class="c tap' + (t === cur ? " on" : "") + '" data-act="chip" data-k="' + key + '" data-v="' + esc(t) + '" aria-pressed="' + (t === cur) + '">' +
+        esc(t) + " <i>" + (n[t] || 0) + "</i></button>";
     }).join("") + "</div>";
+  }
+  function topicList(d) {
+    var out = (Array.isArray(d.topics) && d.topics.length ? d.topics : TOPICS_BUILTIN).filter(function (t) { return typeof t === "string" && t; });
+    (d.bids || []).forEach(function (b) { var t = b.topic || "기타"; if (out.indexOf(t) < 0) out.push(t); });  // 목록 밖 주제도 칩 노출
+    return out;
   }
   function card(b, now, q) {
     var f = info(b, now), title = hl(b.title, q);
@@ -205,7 +217,7 @@
     var nOrg = D.orgs.length, upd = updated(), today = mmdd(now);
     if (!desk()) {
       return mHead("최신 사업공고", "m", [all.length + "건 · 진행 중 " + counts(all, now).open, upd]) +
-        '<div class="xa-mc">' + statusChips(c, S.st, "st", true) + topicChips(S.tp, "tp") + "</div>" +
+        '<div class="xa-mc">' + statusChips(c, S.st, "st", true) + topicChips(S.tp, "tp", byStatus(all, S.st, now)) + "</div>" +
         '<div class="xa-ml">' + grouped(list, now, "") + "</div>" + footer();
     }
     var os = orgStats(all, now), ids = D.orgs.map(function (o) { return o.id; }).sort(function (a, b) {
@@ -219,7 +231,7 @@
       (rest.length ? '<a class="xa-or off" href="#/org"><b>외 ' + rest.length + "개 기관</b><span>" + restN + "<small>건</small></span></a>" : "") +
       '<a class="xa-more tap" href="#/org">기관별로 보기</a></aside>';
     return '<div class="xa-wrap"><div>' + pHead("최신 사업공고", "m", [nOrg + "개 기관 · 일반용역 " + all.length + "건", upd, "D-day는 오늘(" + today + ") 기준"]) +
-      '<div class="xa-chips">' + statusChips(c, S.st, "st", true) + topicChips(S.tp, "tp") + "</div>" +
+      '<div class="xa-chips">' + statusChips(c, S.st, "st", true) + topicChips(S.tp, "tp", byStatus(all, S.st, now)) + "</div>" +
       grouped(list, now, "") + "</div>" + side + "</div>" + footer();
   }
   function orgList(all, now, selId) {
@@ -256,7 +268,7 @@
       return '<div class="xa-top"><a class="bk tap" href="#/org">' + ms("arrow_back_ios_new") + "<span>기관별</span></a><span class=\"sp\"></span>" + themeBtn() + "</div>" +
         '<div class="xa-oh"><div class="xa-mt"><h1>' + esc(orgName(id)) + "</h1>" + ddBtn("m") + '</div><div class="xa-mm" style="margin-bottom:6px"><span>' +
         esc(sectorOf(id)) + "</span><span>" + esc(upd) + "</span></div>" + orgSummary(ol, now) + "</div>" +
-        '<div class="xa-mc">' + statusChips(null, S.ost, "ost", false) + topicChips(S.otp, "otp") + "</div>" +
+        '<div class="xa-mc">' + statusChips(null, S.ost, "ost", false) + topicChips(S.otp, "otp", byStatus(ol, S.ost, now)) + "</div>" +
         '<div class="xa-ml" style="padding-top:8px">' + plain(fl, now) + "</div>" + footer();
     }
     if (!id) {
@@ -272,7 +284,7 @@
     return pHead("기관별 사업공고", "m", [D.orgs.length + "개 기관 · " + nSec + "개 업권 · " + all.length + "건", upd]) +
       '<div class="xa-og"><div>' + orgList(all, now, id) + "</div><div>" +
       '<div class="xa-on">' + esc(orgName(id)) + '</div><div class="xa-oh">' + orgSummary(l, now) + "</div>" +
-      '<div class="xa-chips">' + statusChips(null, S.ost, "ost", false) + topicChips(S.otp, "otp") + "</div>" +
+      '<div class="xa-chips">' + statusChips(null, S.ost, "ost", false) + topicChips(S.otp, "otp", byStatus(l, S.ost, now)) + "</div>" +
       plain(f2, now) + "</div></div>" + footer();
   }
   function searchResults() {
@@ -458,7 +470,7 @@
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
   }).then(function (d) {
-    D = d; D.orgs = D.orgs || []; D.bids = (D.bids || []).slice().sort(function (a, b) { return a.posted < b.posted ? 1 : a.posted > b.posted ? -1 : 0; });
+    D = d; D.orgs = D.orgs || []; TOPICS = topicList(D); D.bids = (D.bids || []).slice().sort(function (a, b) { return a.posted < b.posted ? 1 : a.posted > b.posted ? -1 : 0; });
     D.bids.forEach(function (b) { BY[b.key] = b; });
     render();
   }).catch(function (e) {
