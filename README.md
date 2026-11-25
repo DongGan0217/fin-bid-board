@@ -1,6 +1,6 @@
 # 금융권 사업공고 보드
 
-나라장터(조달청)에 게시된 금융 공공기관 12곳의 일반용역 사업공고를 최신 공고·기관별·검색으로 정리한 정적 페이지입니다.
+나라장터(조달청)에 게시된 금융 공공기관 12곳의 일반용역 사업공고를 최신 공고·최신 사전규격·기관별·검색으로 정리한 정적 페이지입니다.
 
 - 페이지: `docs/` (바닐라 HTML/CSS/JS, 빌드 도구 없음). 데이터는 `docs/data/bids.json` 하나이며, 운영 수집기(`fin_bid_watch`)의 `fbw export`가 만듭니다.
 - 출처: **나라장터(국가종합전자조달) 공개 입찰공고 정보**. 자동 수집·분류 결과이므로 정확한 내용은 각 공고의 '나라장터에서 보기' 원문을 확인해 주세요.
@@ -11,14 +11,17 @@
 
 ## 바로가기(해시 라우팅)
 - `#/latest` 최신 공고(게시일 묶음, 첫 화면)
+- `#/prespec` · `#/prespec/<사전규격등록번호>` 최신 사전규격(공개일 묶음, 기본 게시중만 + '마감 포함' 토글) · 상세 (예: `#/prespec/R26BD00303154`)
+  - 데이터 = `bids.json`의 `prespecs[]`. 게시중/마감은 저장값 `status`, D-day는 의견등록마감일시 기준(KST). 기관별·검색에는 사전규격을 넣지 않습니다.
+  - 상세: `url`이 있으면 [나라장터에서 보기](사전규격상세조회, 무로그인), 없으면 '나라장터 › 발주목록에서 사전규격등록번호로 검색' 안내 + [등록번호 복사].
 - `#/org` · `#/org/<기관 ID>` 기관별 (예: `#/org/kdb`)
 - `#/search?q=<검색어>` 검색(공고명·기관·발주부서·공고번호)
 - `#/bid/<공고번호-차수>` 공고 상세 (예: `#/bid/R26BK01801206-000`)
 
 ## 검증
-`/usr/bin/python3 tests/verify_board.py --db <fbw.db 읽기 전용 사본> --out <폴더>` — Playwright(Chromium)로 390·1280px × 라이트/다크 캡처, 콘솔 오류, 렌더 건수, 검색 건수(DB 대조), 라우트 직접 진입을 점검합니다.
+`/usr/bin/python3 tests/verify_board.py --db <fbw.db 읽기 전용 사본> --out <폴더>` — Playwright(Chromium)로 390·1280px × 라이트/다크 캡처, 콘솔 오류, 렌더 건수, 검색 건수(DB 대조), 라우트 직접 진입, 사전규격 탭(게시중 수·마감 포함 수·상세 S-1·PC 전체 폭·기관별/검색 미포함), 하단 탭바 대비(시안 값 이상), 새 HEX 0을 점검합니다.
 
 ## 라이선스
 - 글꼴: [Pretendard](https://github.com/orioncactus/pretendard) (SIL Open Font License 1.1, jsDelivr CDN)
 - 아이콘: [Material Symbols Rounded](https://fonts.google.com/icons) (Apache License 2.0, Google Fonts)
-- 디자인 토큰: 토스 TDS 3.0 색상값(금융권 인사 보드 `fin-promo-board`와 동일)
+- 디자인 토큰: 토스 TDS 3.0 색상값(금융권 인사 보드 `fin-promo-board`와 동일). 하단 탭바는 ① 반전 면(라이트 grey900 면·다크 grey100 면, 2026-11-25 승인)

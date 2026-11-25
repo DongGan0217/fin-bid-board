@@ -5,6 +5,9 @@
 
 점검: 콘솔 오류 0 · 렌더 건수 = bids.json 건수 · 검색 'ISMP' 건수 = DB 조회 수 · 라우트 직접 진입 ·
       390/1280 × 라이트/다크 캡처 · 카드 금지어/담당자 필드 부재. 결과는 <out>/verify.json.
+      + 사전규격 탭(t_63a567e3): 게시중 수 = status '게시중' 수 · 마감 포함(3개월) = prespecs 전체 수 ·
+      기관별/검색 화면 사전규격 0건 · 상세 S-1(링크 버튼 / 링크 없을 때 안내) · PC S-2(오른쪽 패널 없음) ·
+      하단 탭바 ① 대비 실측 ≥ 시안 값 · app.css 새 HEX 0(main 대비).
 """
 import argparse
 import calendar
@@ -13,8 +16,10 @@ import functools
 import http.server
 import json
 import os
+import re
 import socketserver
 import sqlite3
+import subprocess
 import threading
 
 from playwright.sync_api import sync_playwright
@@ -31,6 +36,160 @@ def cutoff(today, months):
     y, m = divmod(today.year * 12 + today.month - 1 - months, 12)
     m += 1
     return datetime.date(y, m, min(today.day, calendar.monthrange(y, m)[1])).isoformat()
+
+
+# 시안 t_6461f479 contrast.md ① 값(라이트 / 다크): 탭바↔카드, 선택 글자(알약 위), 비선택 글자(탭바 위)
+TABBAR_MIN = {"light": {"bar_card": 16.56, "on": 11.00, "off": 8.26},
+              "dark": {"bar_card": 9.97, "on": 11.32, "off": 6.45}}
+
+
+def _lum(rgb):
+    def ch(c):
+        c = c / 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = [ch(x) for x in rgb]
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a, b):
+    la, lb = sorted([_lum(a), _lum(b)], reverse=True)
+    return round((la + 0.05) / (lb + 0.05), 2)
+
+
+def parse_rgb(css):
+    return [int(float(x)) for x in re.findall(r"[\d.]+", css)[:3]]
+
+
+def hex_check():
+    """app.css의 HEX 중 main 브랜치 app.css에 없는 값(새 HEX) — 0이어야 함."""
+    cur = open(os.path.join(DOCS, "assets", "app.css"), encoding="utf-8").read()
+    try:
+        base = subprocess.run(["git", "-C", ROOT, "show", "main:docs/assets/app.css"], capture_output=True,
+                              text=True, check=True).stdout
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+    hx = lambda t: {h.upper() for h in re.findall(r"#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{3}\b", t)}  # noqa: E731
+    js = open(os.path.join(DOCS, "assets", "app.js"), encoding="utf-8").read()
+    return {"new_hex_css": sorted(hx(cur) - hx(base)), "hex_in_js": sorted(hx(js)),
+            "rgba_new": sorted(set(re.findall(r"rgba\([^)]*\)", cur)) - set(re.findall(r"rgba\([^)]*\)", base)))}
+
+
+def tabbar(pg):
+    return pg.evaluate("""() => {
+      const n = document.querySelector('.nav'), on = n.querySelector('a.on'), off = n.querySelector('a:not(.on)');
+      const card = document.querySelector('#app .xa-card'), cs = e => getComputedStyle(e);
+      return {bar: cs(n).backgroundColor, card: card ? cs(card).backgroundColor : null,
+              onColor: cs(on).color, onBg: cs(on).backgroundColor, onWeight: cs(on).fontWeight,
+              offColor: cs(off).color, labels: [...n.querySelectorAll('a')].map(a => [...a.childNodes].filter(c => c.nodeType === 3).map(c => c.textContent).join('').trim()),
+              onIconFilled: on.querySelector('.ms').classList.contains('f'),
+              tabs: [...n.querySelectorAll('a')].map(a => { const r = a.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; }),
+              clipped: [...n.querySelectorAll('a')].filter(a => a.scrollWidth > a.clientWidth + 1).length};
+    }""")
+
+
+def prespec_checks(pg, newpage, base, data, a, vname, scheme, res):
+    """사전규격 탭: 건수·토글·상세(S-1)·PC 폭(S-2)·탭바 대비·기관별/검색 미포함."""
+    out = {}
+    pre = data.get("prespecs") or []
+    n_open = sum(1 for p in pre if p["status"] == "게시중")
+    shot = lambda name, full=False: (pg.screenshot(path=os.path.join(a.out, "%s%s-%s-%s.png" % (a.prefix, vname, scheme, name)), full_page=full),  # noqa: E731
+                                     res["shots"].append(os.path.join(a.out, "%s%s-%s-%s.png" % (a.prefix, vname, scheme, name))))
+    pg.goto(base + "#/prespec", wait_until="networkidle")
+    pg.wait_for_selector("#app .xa-pre")
+    pg.evaluate("document.fonts.ready")
+    pg.wait_for_timeout(200)
+    out["open_default_1m"] = pg.locator("#app .xa-pre").count()
+    out["open_json"] = n_open
+    out["tab_on"] = pg.evaluate("(document.querySelector(vname==='m' ? '.nav a.on' : '.gnb nav a.on')||{}).textContent".replace("vname", repr(vname)))
+    out["side_panel"] = pg.locator("#app .xa-side").count()
+    if vname == "pc":
+        out["list_width"] = pg.evaluate("Math.round(document.querySelector('#app [data-pre-list]').getBoundingClientRect().width)")
+        out["title_width"] = pg.evaluate("Math.round(document.querySelector('#app .xa-pre .b2').getBoundingClientRect().width)")
+    else:
+        tb = tabbar(pg)
+        bar, card, on_c, on_bg, off_c = (parse_rgb(tb[k]) for k in ("bar", "card", "onColor", "onBg", "offColor"))
+        out["tabbar"] = dict(tb, bar_card=contrast(bar, card), on=contrast(on_c, on_bg), off=contrast(off_c, bar),
+                             min=TABBAR_MIN[scheme])
+        out["tabbar"]["ok"] = (all(out["tabbar"][k] >= TABBAR_MIN[scheme][k] for k in ("bar_card", "on", "off"))
+                               and tb["labels"] == ["최신 공고", "최신 사전규격", "기관별", "검색"]
+                               and int(tb["onWeight"]) >= 700 and tb["onIconFilled"] and not tb["clipped"]
+                               and all(w >= 48 and h >= 48 for w, h in tb["tabs"]))
+    # 마감 포함 + 3개월 → prespecs 전체
+    pg.click("#app .dd")
+    pg.click("#sheet .opt[data-m='3']")
+    pg.wait_for_timeout(200)
+    out["open_3m"] = pg.locator("#app .xa-pre").count()
+    pg.click('#app [data-act="pc"]')
+    pg.wait_for_timeout(200)
+    out["with_closed_3m"] = pg.locator("#app .xa-pre").count()
+    out["json_total"] = len(pre)
+    out["closed_badges"] = pg.locator("#app .xa-pre .bd.x").count()
+    pg.evaluate("(() => { const e = document.querySelector('#app .xa-pre .bd.x'); if (e) window.scrollTo(0, e.closest('.xa-card').getBoundingClientRect().top + scrollY - 220); })()")
+    pg.wait_for_timeout(200)
+    shot("prespec-closed")
+    pg.click('#app [data-act="pc"]')                 # 끄기 → 게시중만
+    pg.wait_for_timeout(150)
+    out["after_toggle_off"] = pg.locator("#app .xa-pre").count()
+    # 카드 클릭 → 상세 → 닫기
+    pg.evaluate("window.scrollTo(0,0)")
+    first = [p for p in pre if p["status"] == "게시중"]
+    pg.locator("#app .xa-pre").first.click()
+    pg.wait_for_selector("#sheet .sheet")
+    out["click_hash"] = pg.evaluate("location.hash")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
+    out["after_close"] = pg.evaluate("location.hash")
+    # 상세 직접 진입(S-1 링크 있음)
+    p0 = sorted(first, key=lambda p: p["ddln"] or "")[-1] if first else pre[0]
+    pg2 = newpage()
+    pg2.goto(base + "#/prespec/" + p0["no"], wait_until="networkidle")
+    pg2.wait_for_selector("#sheet .sheet")
+    pg2.evaluate("document.fonts.ready")
+    pg2.wait_for_timeout(300)
+    det = pg2.evaluate("""() => ({labels: [...document.querySelectorAll('#sheet .kv>span')].map(e => e.textContent),
+      btn1: (document.querySelector('#sheet a.btn1')||{}).href || null, pn: !!document.querySelector('#sheet .pn'),
+      copy: (document.querySelector('#sheet [data-act=copy]')||{}).textContent || '', base: (document.querySelector('#app h1')||{}).textContent || ''})""")
+    det["no"] = p0["no"]
+    out["detail_link"] = det
+    p_ = pg2
+    p_.screenshot(path=os.path.join(a.out, "%s%s-%s-prespec-detail.png" % (a.prefix, vname, scheme)))
+    res["shots"].append(os.path.join(a.out, "%s%s-%s-prespec-detail.png" % (a.prefix, vname, scheme)))
+    pg2.keyboard.press("Escape")
+    pg2.wait_for_timeout(300)
+    out["detail_close_to"] = pg2.evaluate("location.hash")
+    pg2.close()
+    # 상세 S-1 안내(링크 없는 데이터로 대체 응답)
+    d2 = dict(data)
+    d2["prespecs"] = [dict(p, url=None) for p in pre]
+    pg3 = newpage()
+    pg3.route("**/data/bids.json", lambda r: r.fulfill(status=200, content_type="application/json",
+                                                        body=json.dumps(d2, ensure_ascii=False)))
+    pg3.goto(base + "?nolink=1#/prespec/" + p0["no"], wait_until="networkidle")
+    pg3.wait_for_selector("#sheet .sheet")
+    pg3.evaluate("document.fonts.ready")
+    pg3.wait_for_timeout(300)
+    out["detail_nolink"] = pg3.evaluate("""() => ({btn1: !!document.querySelector('#sheet a.btn1'),
+      pn: (document.querySelector('#sheet .pn')||{}).textContent || '', copy: !!document.querySelector('#sheet [data-act=copy]')})""")
+    pg3.screenshot(path=os.path.join(a.out, "%s%s-%s-prespec-detail-nolink.png" % (a.prefix, vname, scheme)))
+    res["shots"].append(os.path.join(a.out, "%s%s-%s-prespec-detail-nolink.png" % (a.prefix, vname, scheme)))
+    pg3.close()
+    # 기관별·검색에는 사전규격 없음
+    nopre = {}
+    for h in ("#/org", "#/org/kexim", "#/search?q=ISMP", "#/search?q=" + (pre[0]["no"] if pre else "R26BD")):
+        pg.goto(base + h, wait_until="networkidle")
+        pg.wait_for_timeout(250)
+        nopre[h] = pg.locator("#app .xa-pre, #app .pt").count()
+    out["no_prespec_elsewhere"] = nopre
+    want_labels = ["발주기관", "배정예산", "공개일시", "의견등록 마감", "진행상태", "주제", "사전규격등록번호", "입찰공고 연결"]
+    out["ok"] = (out["open_default_1m"] == n_open and out["with_closed_3m"] == len(pre) and out["after_toggle_off"] == out["open_3m"]
+                 and out["side_panel"] == 0 and det["labels"] == want_labels and bool(det["btn1"]) == bool(p0.get("url"))
+                 and det["copy"].endswith("등록번호 복사") and out["detail_nolink"]["btn1"] is False
+                 and "나라장터 › 발주목록에서 사전규격등록번호로 검색" in out["detail_nolink"]["pn"]
+                 and out["click_hash"].startswith("#/prespec/") and out["after_close"] == "#/prespec"
+                 and out["detail_close_to"] == "#/prespec" and not any(nopre.values())
+                 and out["tab_on"].strip().endswith("최신 사전규격")
+                 and (vname == "m" and out["tabbar"]["ok"] or vname == "pc" and out["list_width"] == 1120))
+    return out
 
 
 def db_count(db, q, today, months=3):
@@ -142,7 +301,7 @@ def main():
     bid_key = ismp[-1]["key"] if ismp else data["bids"][0]["key"]
     srv, base = serve()
     res = {"base": base, "bids_json": n_bids, "console_errors": [], "routes": {}, "shots": [], "checks": {},
-           "topic_checks": {}}
+           "topic_checks": {}, "prespec_checks": {}, "hex": hex_check()}
     today = datetime.date.today()
     res["checks"]["ismp_db"] = db_count(a.db, "ISMP", today)
 
@@ -160,7 +319,8 @@ def main():
                     pg_.on("pageerror", lambda x: e.append("pageerror: %s" % x))
                     return pg_
                 routes = [("latest", "#/latest"), ("org", "#/org"), ("org-kdb", "#/org/kdb"),
-                          ("search-ISMP", "#/search?q=ISMP"), ("bid", "#/bid/" + bid_key), ("root", "")]
+                          ("search-ISMP", "#/search?q=ISMP"), ("bid", "#/bid/" + bid_key), ("root", ""),
+                          ("prespec", "#/prespec")]
                 for rname, h in routes:
                     pg = newpage()  # 라우트마다 새 문서로 직접 진입
                     pg.goto(base + h, wait_until="networkidle")
@@ -224,6 +384,9 @@ def main():
                     shot = os.path.join(a.out, "%s%s-light-latest-full.png" % (a.prefix, vname))
                     pg.screenshot(path=shot, full_page=True)
                     res["shots"].append(shot)
+                pgp = newpage()
+                res["prespec_checks"]["%s-%s" % (vname, scheme)] = prespec_checks(pgp, newpage, base, data, a, vname, scheme, res)
+                pgp.close()
                 res["console_errors"] += ["%s-%s: %s" % (vname, scheme, e) for e in errs]
                 ctx.close()
         br.close()
@@ -242,6 +405,13 @@ def main():
         "robots_meta": sorted({v.get("robots") for v in r.values() if "robots" in v}),
         "bid_key": bid_key, "bid_key_in_data": bid_key in keys,
         "topic_checks_ok": all(v.get("ok") for v in res["topic_checks"].values()) and len(res["topic_checks"]) == 2,
+        "prespec_checks_ok": all(v.get("ok") for v in res["prespec_checks"].values()) and len(res["prespec_checks"]) == 4,
+        "prespec_counts": {k: [v["open_default_1m"], v["open_json"], v["with_closed_3m"], v["json_total"]]
+                           for k, v in res["prespec_checks"].items()},
+        "tabbar": {k: {x: v["tabbar"][x] for x in ("bar_card", "on", "off", "ok")}
+                   for k, v in res["prespec_checks"].items() if "tabbar" in v},
+        "new_hex_css": res["hex"].get("new_hex_css"), "hex_in_js": res["hex"].get("hex_in_js"),
+        "rgba_new": res["hex"].get("rgba_new"),
     })
     json.dump(res, open(os.path.join(a.out, a.prefix + "verify.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps(res["checks"], ensure_ascii=False, indent=1))
