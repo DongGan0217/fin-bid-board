@@ -172,19 +172,35 @@
     (d.bids || []).forEach(function (b) { var t = b.topic || "기타"; if (out.indexOf(t) < 0) out.push(t); });  // 목록 밖 주제도 칩 노출
     return out;
   }
+  // ListRow(T4) 3영역: left = D-day 배지 · contents = 기관·부서 / 사업명 · right = 마감일시 + 배정(tnum).
+  // 배치(모바일 3줄 · PC 2줄)는 CSS grid가 정한다 — A안 4항목·배치 유지.
+  function lrow(cls, href, attr, bd, og, title, dl, am) {
+    return '<a class="lr xa-bid' + cls + '" href="' + href + '" ' + attr + '><span class="lr-left">' + bd + "</span>" +
+      '<span class="lr-contents">' + og + '<span class="b2">' + title + "</span></span>" +
+      '<span class="lr-right">' + dl + am + "</span></a>";
+  }
   function card(b, now, q) {
     var f = info(b, now), title = hl(b.title, q);
     if (f.cancel) title = '<s class="cx">' + title + "</s>";
     var og = '<span class="og"><b>' + hl(b.org, q) + "</b>" + (b.dept ? " · " + hl(b.dept, q) : "") + "</span>";
-    var dln = '<span class="dln">' + badge(b, now) + dline(b, now) + "</span>";
     var am = '<span class="am"><small>배정</small>' + esc(amtShort(b.budget)) + "</span>";
-    return '<a class="xa-bid" href="#/bid/' + encodeURIComponent(b.key) + '" data-key="' + esc(b.key) + '">' +
-      '<div class="b1">' + og + '<span class="rt">' + dln + am + "</span></div>" +
-      '<div class="b2">' + title + "</div>" +
-      '<div class="b5">' + dln + am + "</div></a>";
+    return lrow("", "#/bid/" + encodeURIComponent(b.key), 'data-key="' + esc(b.key) + '"', badge(b, now), og, title, dline(b, now), am);
   }
-  function grouped(list, now, q) {
-    if (!list.length) return '<p class="a-hint">조건에 맞는 공고가 없습니다</p>';
+  // 상태(T5) — Empty: 아이콘 + 제목 + 안내 1줄(필터가 걸려 있으면 [필터 해제]). .a-hint는 빈 상태 표식(시험 호환).
+  var FILTERS = { latest: ["st", "tp"], org: ["ost", "otp"], pre: ["ptp"], search: ["sst"] };
+  function filtered(rk) { return (FILTERS[rk] || []).some(function (k) { return S[k] && S[k] !== "all"; }); }
+  function empty(title, rk, icon, desc) {
+    var on = filtered(rk);
+    return '<div class="a-hint st st-empty">' + ms(icon || "inbox") + "<b>" + esc(title) + "</b><p>" +
+      esc(desc || (on ? "필터를 해제하거나 조회 기간을 넓혀 보세요" : "조회 기간을 넓혀 보세요")) + "</p>" +
+      (on && rk ? '<button type="button" class="btn-weak tap" data-act="reset" data-r="' + rk + '">' + ms("filter_alt_off") + "필터 해제</button>" : "") + "</div>";
+  }
+  function errorBox(msg) {
+    return '<div class="st st-error" role="alert">' + ms("error", true) + "<b>데이터를 불러오지 못했어요</b><p>" + esc(msg) + "</p>" +
+      '<button type="button" class="btn-weak tap" data-act="retry">' + ms("refresh") + "다시 시도</button></div>";
+  }
+  function grouped(list, now, q, rk) {
+    if (!list.length) return empty("조건에 맞는 공고가 없습니다", rk);
     var g = [], cur = null;
     list.forEach(function (b) {
       var d = (b.posted || "").slice(0, 10);
@@ -197,7 +213,7 @@
     }).join("");
   }
   function plain(list, now) {
-    if (!list.length) return '<p class="a-hint">조건에 맞는 공고가 없습니다</p>';
+    if (!list.length) return empty("조건에 맞는 공고가 없습니다", "org");
     return '<div class="xa-card" data-list>' + list.map(function (b) { return card(b, now, ""); }).join("") + "</div>";
   }
   function footer() { return '<div class="fn">' + NOTE + "</div>"; }
@@ -227,15 +243,12 @@
     return '<span class="dl">' + esc(mdhm(p.ddln)) + " 의견마감</span>";
   }
   function pcard(p, now) {
-    var dln = '<span class="dln">' + pbadge(p, now) + pdline(p, now) + "</span>";
     var am = '<span class="am"><small>배정</small>' + esc(amtShort(p.budget)) + "</span>";
-    return '<a class="xa-bid xa-pre" href="#/prespec/' + encodeURIComponent(p.no) + '" data-pre="' + esc(p.no) + '">' +
-      '<div class="b1"><span class="og"><span class="pt">사전규격</span><b>' + esc(p.org) + '</b></span><span class="rt">' + dln + am + "</span></div>" +
-      '<div class="b2">' + esc(p.title) + "</div>" +
-      '<div class="b5">' + dln + am + "</div></a>";
+    var og = '<span class="og"><span class="pt">사전규격</span><b>' + esc(p.org) + "</b></span>";
+    return lrow(" xa-pre", "#/prespec/" + encodeURIComponent(p.no), 'data-pre="' + esc(p.no) + '"', pbadge(p, now), og, esc(p.title), pdline(p, now), am);
   }
   function pgrouped(list, now) {
-    if (!list.length) return '<p class="a-hint">조건에 맞는 사전규격이 없습니다</p>';
+    if (!list.length) return empty("조건에 맞는 사전규격이 없습니다", "pre");
     var g = [], cur = null;
     list.forEach(function (p) {
       var d = (p.posted || "").slice(0, 10);
@@ -271,9 +284,8 @@
       var dd = dayNum(p.ddln) - dayNum(now);
       left = dd <= 0 ? "오늘 마감" : dd + "일 남음";
     }
-    var link = p.url
-      ? '<a class="btn1 tap" href="' + esc(p.url) + '" target="_blank" rel="noopener noreferrer">나라장터에서 보기 ' + ms("open_in_new") + "</a>"
-      : '<p class="pn">' + ms("info") + "<span><b>나라장터 › 발주목록</b>에서 사전규격등록번호로 검색</span></p>";
+    var link = p.url ? '<a class="btn1 tap" href="' + esc(p.url) + '" target="_blank" rel="noopener noreferrer">나라장터에서 보기 ' + ms("open_in_new") + "</a>" : "";
+    var note = p.url ? "" : '<p class="pn">' + ms("info") + "<span><b>나라장터 › 발주목록</b>에서 사전규격등록번호로 검색</span></p>";
     return '<div class="dt-h">' + pbadge(p, now) + '<span class="pt">사전규격</span><span class="tp">' + esc(p.topic || "기타") + "</span></div>" +
       '<h2 class="dt-t">' + esc(p.title) + "</h2>" +
       '<div class="kv"><span>발주기관</span><b>' + esc(p.org) + "</b></div>" +
@@ -282,9 +294,13 @@
       '<div class="kv"><span>의견등록 마감</span><b>' + esc(p.ddln ? mdhm(p.ddln) : "미표시") + (left ? "<small>" + left + "</small>" : "") + "</b></div>" +
       '<div class="kv"><span>진행상태</span><b>' + esc(p.status || "–") + "</b></div>" +
       '<div class="kv"><span>주제</span><b>' + esc(p.topic || "기타") + "</b></div>" +
-      '<div class="kv"><span>사전규격등록번호</span><b style="font-variant-numeric:tabular-nums">' + esc(p.no) + "</b></div>" +
-      '<div class="kv"><span>입찰공고 연결</span><b>' + (p.bid_linked === "Y" ? "연결됨" : "아직 없음") + "</b></div>" + link +
-      '<button type="button" class="btn2 tap" data-act="copy" data-key="' + esc(p.no) + '" data-lab="등록번호 복사">' + ms("content_copy") + "<span>등록번호 복사</span></button>";
+      '<div class="kv"><span>사전규격등록번호</span><b class="num">' + esc(p.no) + "</b></div>" +
+      '<div class="kv"><span>입찰공고 연결</span><b>' + (p.bid_linked === "Y" ? "연결됨" : "아직 없음") + "</b></div>" + note +
+      cta(p.no, "등록번호 복사", link);
+  }
+  // BottomCTA.Double(D-B3): 왼쪽 [번호 복사] weak · 오른쪽 [나라장터에서 보기] fill. URL이 없으면 복사 버튼 단독.
+  function cta(no, lab, link) {
+    return '<div class="cta"><button type="button" class="btn2 tap" data-act="copy" data-key="' + esc(no) + '" data-lab="' + lab + '"><span>' + lab + "</span></button>" + link + "</div>";
   }
 
   // ── 화면 ───────────────────────────────────────────────────────
@@ -295,7 +311,7 @@
     if (!desk()) {
       return mHead("최신 사업공고", "m", [all.length + "건 · 진행 중 " + counts(all, now).open, upd]) +
         '<div class="xa-mc">' + statusChips(c, S.st, "st", true) + topicChips(S.tp, "tp", byStatus(all, S.st, now)) + "</div>" +
-        '<div class="xa-ml">' + grouped(list, now, "") + "</div>" + footer();
+        '<div class="xa-ml">' + grouped(list, now, "", "latest") + "</div>" + footer();
     }
     var os = orgStats(all, now), ids = D.orgs.map(function (o) { return o.id; }).sort(function (a, b) {
       return os[b].n - os[a].n || orgOrder(a) - orgOrder(b);
@@ -309,7 +325,7 @@
       '<a class="xa-more tap" href="#/org">기관별로 보기</a></aside>';
     return '<div class="xa-wrap"><div>' + pHead("최신 사업공고", "m", [nOrg + "개 기관 · 일반용역 " + all.length + "건", upd, "D-day는 오늘(" + today + ") 기준"]) +
       '<div class="xa-chips">' + statusChips(c, S.st, "st", true) + topicChips(S.tp, "tp", byStatus(all, S.st, now)) + "</div>" +
-      grouped(list, now, "") + "</div>" + side + "</div>" + footer();
+      grouped(list, now, "", "latest") + "</div>" + side + "</div>" + footer();
   }
   function orgList(all, now, selId) {
     var os = orgStats(all, now);
@@ -319,11 +335,11 @@
       return '<div class="xa-card"><div class="xa-st"><b>' + esc(s.name) + "</b><small>" + n + "건</small></div>" +
         ids.map(function (id) {
           var st = os[id], off = !st.n;
-          return '<a class="xa-co tap' + (off ? " off" : "") + (id === selId ? " sel" : "") + '" href="#/org/' + id + '"' + (id === selId ? ' aria-current="true"' : "") + ">" +
-            '<span class="xa-av">' + esc(ABBR[id] || orgName(id).slice(0, 2)) + "</span>" +
-            '<div class="tx"><b>' + esc(orgName(id)) + "</b><span>" +
+          return '<a class="lr xa-co' + (off ? " off" : "") + (id === selId ? " sel" : "") + '" href="#/org/' + id + '"' + (id === selId ? ' aria-current="true"' : "") + ">" +
+            '<span class="lr-left xa-av">' + esc(ABBR[id] || orgName(id).slice(0, 2)) + "</span>" +
+            '<div class="lr-contents tx"><b>' + esc(orgName(id)) + "</b><span>" +
             (off ? "최근 " + S.months + "개월 공고 없음" : "진행 중 " + st.open + " · 최근 " + mmdd(st.last) + " 게시") + "</span></div>" +
-            '<span class="ct">' + st.n + "<small>건</small></span>" + ms("chevron_right") + "</a>";
+            '<span class="lr-right"><span class="ct">' + st.n + "<small>건</small></span>" + ms("chevron_right") + "</span></a>";
         }).join("") + "</div>";
     }).join("") + "</div>";
   }
@@ -343,10 +359,10 @@
       var ol = all.filter(function (b) { return b.org_id === id; });
       var fl = byStatus(byTopic(ol, S.otp), S.ost, now);
       return '<div class="xa-top"><a class="bk tap" href="#/org">' + ms("arrow_back_ios_new") + "<span>기관별</span></a><span class=\"sp\"></span>" + themeBtn() + "</div>" +
-        '<div class="xa-oh"><div class="xa-mt"><h1>' + esc(orgName(id)) + "</h1>" + ddBtn("m") + '</div><div class="xa-mm" style="margin-bottom:6px"><span>' +
+        '<div class="xa-oh"><div class="xa-mt"><h1>' + esc(orgName(id)) + "</h1>" + ddBtn("m") + '</div><div class="xa-mm xa-mm-o"><span>' +
         esc(sectorOf(id)) + "</span><span>" + esc(upd) + "</span></div>" + orgSummary(ol, now) + "</div>" +
         '<div class="xa-mc">' + statusChips(null, S.ost, "ost", false) + topicChips(S.otp, "otp", byStatus(ol, S.ost, now)) + "</div>" +
-        '<div class="xa-ml" style="padding-top:8px">' + plain(fl, now) + "</div>" + footer();
+        '<div class="xa-ml xa-ml-o">' + plain(fl, now) + "</div>" + footer();
     }
     if (!id) {
       var os = orgStats(all, now);
@@ -366,11 +382,11 @@
   }
   function searchResults() {
     var now = nowKst(), q = S.q.trim();
-    if (!q) return '<p class="a-hint">공고명 · 기관 · 발주부서 · 공고번호로 찾아요</p>';
+    if (!q) return '<div class="a-hint st">' + ms("search") + "<b>공고를 찾아보세요</b><p>공고명 · 기관 · 발주부서 · 공고번호로 찾아요</p></div>";
     var hit = inPeriod(D.bids, S.sMonths, now).filter(function (b) { return match(b, q); });
     var list = byStatus(hit, S.sst, now);
     return '<div class="xa-ms" data-count="' + list.length + '">‘' + esc(q) + "’ <b>" + list.length + "건</b> · 최근 " + S.sMonths + "개월 · 게시일 최신순</div>" +
-      '<div class="xa-ml">' + grouped(list, now, q) + "</div>";
+      '<div class="xa-ml">' + grouped(list, now, q, "search") + "</div>";
   }
   function viewSearch() {
     var box = '<label class="srch">' + ms("search") + '<span class="sr">검색어</span><input id="q" type="search" placeholder="공고명 · 기관 · 공고번호" autocomplete="off" value="' + esc(S.q) + '">' +
@@ -401,15 +417,14 @@
       '<div class="kv"><span>배정 · 추정</span><b>배정 ' + esc(amtFull(b.budget)) + "<small>추정 " + esc(amtFull(b.est)) + "</small></b></div>" +
       '<div class="kv"><span>낙찰방법</span><b>' + esc(b.award || "–") + "</b></div>" +
       '<div class="kv"><span>게시 → 마감</span><b>' + esc(mdhm(b.posted) || "–") + " → " + esc(b.closes ? mdhm(b.closes) : "마감일 미표시") + "</b></div>" +
-      '<div class="kv"><span>공고번호</span><b style="font-variant-numeric:tabular-nums">' + esc(b.key) + "</b></div>" +
+      '<div class="kv"><span>공고번호</span><b class="num">' + esc(b.key) + "</b></div>" +
       '<div class="hh">차수 이력 <small>' + (rel.length ? (rel.length + 1) + "건 연결" : "연결된 차수 없음") + '</small></div><ul class="hist">' + hist + "</ul>" +
-      (b.url ? '<a class="btn1 tap" href="' + esc(b.url) + '" target="_blank" rel="noopener noreferrer">나라장터에서 보기 ' + ms("open_in_new") + "</a>" : "") +
-      '<button type="button" class="btn2 tap" data-act="copy" data-key="' + esc(b.key) + '">' + ms("content_copy") + "<span>공고번호 복사</span></button>";
+      cta(b.key, "공고번호 복사", b.url ? '<a class="btn1 tap" href="' + esc(b.url) + '" target="_blank" rel="noopener noreferrer">나라장터에서 보기 ' + ms("open_in_new") + "</a>" : "");
   }
   function openDetail(key) {
     var b = BY[key];
     if (!b) { sheetEl.innerHTML = ""; return false; }
-    sheetEl.innerHTML = '<div class="scrim" data-act="close"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="공고 상세" tabindex="-1"><div class="hd"></div>' +
+    sheetEl.innerHTML = '<div class="scrim" data-act="close"></div><div class="sheet dt" role="dialog" aria-modal="true" aria-label="공고 상세" tabindex="-1"><div class="hd"></div>' +
       '<button type="button" class="x tap" data-act="close" aria-label="닫기">' + ms("close") + "</button>" + detail(b) + "</div>";
     try { sheetEl.querySelector(".sheet").focus({ preventScroll: true }); } catch (e) { /* 무시 */ }
     return true;
@@ -417,7 +432,7 @@
   function openPre(no) {
     var p = PBY[no];
     if (!p) { sheetEl.innerHTML = ""; return false; }
-    sheetEl.innerHTML = '<div class="scrim" data-act="close"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="사전규격 상세" tabindex="-1"><div class="hd"></div>' +
+    sheetEl.innerHTML = '<div class="scrim" data-act="close"></div><div class="sheet dt" role="dialog" aria-modal="true" aria-label="사전규격 상세" tabindex="-1"><div class="hd"></div>' +
       '<button type="button" class="x tap" data-act="close" aria-label="닫기">' + ms("close") + "</button>" + pdetail(p) + "</div>";
     try { sheetEl.querySelector(".sheet").focus({ preventScroll: true }); } catch (e) { /* 무시 */ }
     return true;
@@ -528,6 +543,11 @@
     }
     if (a === "pc") { S.pc = !S.pc; var y2 = window.scrollY; render(); window.scrollTo(0, y2); return; }
     if (a === "clear") { S.q = ""; history.replaceState(null, "", "#/search"); render(); var i = document.getElementById("q"); if (i) i.focus(); return; }
+    if (a === "reset") {                          // 빈 결과 [필터 해제] — 그 화면의 상태·주제 필터만 기본값으로
+      (FILTERS[t.getAttribute("data-r")] || []).forEach(function (k) { S[k] = /st$/.test(k) ? "all" : ""; });
+      return render();
+    }
+    if (a === "retry") return load();
     if (a === "copy") {
       var key = t.getAttribute("data-key"), lab = t.querySelector("span:last-child"), lab0 = t.getAttribute("data-lab") || "공고번호 복사";
       var done = function () { if (lab) { lab.textContent = "복사했어요"; setTimeout(function () { lab.textContent = lab0; }, 1500); } };
@@ -563,20 +583,39 @@
   var onMq = function () { render(); };
   if (mq.addEventListener) mq.addEventListener("change", onMq); else if (mq.addListener) mq.addListener(onMq);
 
-  fetch("data/bids.json", { cache: "no-cache" }).then(function (r) {
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    return r.json();
-  }).then(function (d) {
-    D = d; D.orgs = D.orgs || []; TOPICS = topicList(D); D.bids = (D.bids || []).slice().sort(function (a, b) { return a.posted < b.posted ? 1 : a.posted > b.posted ? -1 : 0; });
-    D.bids.forEach(function (b) { BY[b.key] = b; });
-    // 사전규격: 공개일 → 공개일시 → 등록번호 최신순(마감 건은 rls 없음)
-    D.prespecs = (D.prespecs || []).slice().sort(function (a, b) {
-      var x = (b.posted || "") + "|" + (b.rls || "0") + "|" + b.no, y = (a.posted || "") + "|" + (a.rls || "0") + "|" + a.no;
-      return x < y ? -1 : x > y ? 1 : 0;
+  // Loading = index.html의 Skeleton(행 6개) · Error = 원인 1줄 + [다시 시도]
+  var SKEL = app.innerHTML;
+  function load() {
+    app.innerHTML = SKEL;
+    app.setAttribute("aria-busy", "true");
+    fetch("data/bids.json", { cache: "no-cache" }).then(function (r) {
+      if (!r.ok) { var he = new Error("HTTP " + r.status); he.status = r.status; throw he; }
+      return r.json().catch(function (je) { je.kind = "json"; throw je; });
+    }).then(function (d) {
+      D = d; D.orgs = D.orgs || []; TOPICS = topicList(D); D.bids = (D.bids || []).slice().sort(function (a, b) { return a.posted < b.posted ? 1 : a.posted > b.posted ? -1 : 0; });
+      D.bids.forEach(function (b) { BY[b.key] = b; });
+      // 사전규격: 공개일 → 공개일시 → 등록번호 최신순(마감 건은 rls 없음)
+      D.prespecs = (D.prespecs || []).slice().sort(function (a, b) {
+        var x = (b.posted || "") + "|" + (b.rls || "0") + "|" + b.no, y = (a.posted || "") + "|" + (a.rls || "0") + "|" + a.no;
+        return x < y ? -1 : x > y ? 1 : 0;
+      });
+      D.prespecs.forEach(function (p) { PBY[p.no] = p; });
+      app.removeAttribute("aria-busy");
+      render();
+    }).catch(function (e) {
+      app.removeAttribute("aria-busy");
+      try { console.warn("bids.json 불러오기 실패:", e); } catch (x) { /* 무시 */ }
+      app.innerHTML = errorBox(errText(e));
     });
-    D.prespecs.forEach(function (p) { PBY[p.no] = p; });
-    render();
-  }).catch(function (e) {
-    app.innerHTML = '<p class="a-hint">데이터를 불러오지 못했습니다(' + esc(e.message) + ")</p>";
-  });
+  }
+  // 오류 원인 한글화(D-T6=A, 인사보드와 같은 규칙): 브라우저 원문은 console.warn으로만, 화면에는 한글 문장.
+  function errText(e) {
+    e = e || {};
+    if (e.status === 404) return "데이터 파일을 찾지 못했어요";
+    if (e.status) return "서버 응답이 올바르지 않아요 (HTTP " + e.status + ")";
+    if (e.kind === "json" || e.name === "SyntaxError") return "데이터 형식을 읽지 못했어요";
+    if (e.name === "TypeError") return "네트워크 연결을 확인해 주세요";   // fetch 실패(오프라인·차단)
+    return "잠시 후 다시 시도해 주세요";
+  }
+  load();
 })();

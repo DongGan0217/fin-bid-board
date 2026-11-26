@@ -7,7 +7,7 @@
       390/1280 × 라이트/다크 캡처 · 카드 금지어/담당자 필드 부재. 결과는 <out>/verify.json.
       + 사전규격 탭(t_63a567e3): 게시중 수 = status '게시중' 수 · 마감 포함(3개월) = prespecs 전체 수 ·
       기관별/검색 화면 사전규격 0건 · 상세 S-1(링크 버튼 / 링크 없을 때 안내) · PC S-2(오른쪽 패널 없음) ·
-      하단 탭바 ① 대비 실측 ≥ 시안 값 · app.css 새 HEX 0(main 대비).
+      하단 탭바 ① 대비 실측 ≥ 시안 값 · app.css 새 HEX 0(2b-T부터 DESIGN.md 토큰 집합 기준, main 대비는 참고값).
 """
 import argparse
 import calendar
@@ -60,8 +60,13 @@ def parse_rgb(css):
     return [int(float(x)) for x in re.findall(r"[\d.]+", css)[:3]]
 
 
+DESIGN_MD = os.path.expanduser("~/projects/DesignSystem-RE/toss/DESIGN.md")
+
+
 def hex_check():
-    """app.css의 HEX 중 main 브랜치 app.css에 없는 값(새 HEX) — 0이어야 함."""
+    """app.css 색 값 점검 — 0이어야 하는 항목: new_hex_css(DESIGN.md 토큰 집합 밖 HEX), rgba_new(DESIGN.md·main 둘 다에 없는 rgba).
+    2b-T(t_9ebf54c4): 다크 팔레트를 DESIGN §2.2 Dark로 재정의하면서 main 대비 새 HEX가 생기므로(D-B1),
+    기준을 'main 대비'에서 'DESIGN.md 토큰 집합'으로 바꿨다. main 대비 새 HEX는 참고값(new_hex_vs_main)으로만 남긴다."""
     cur = open(os.path.join(DOCS, "assets", "app.css"), encoding="utf-8").read()
     try:
         base = subprocess.run(["git", "-C", ROOT, "show", "main:docs/assets/app.css"], capture_output=True,
@@ -69,9 +74,15 @@ def hex_check():
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
     hx = lambda t: {h.upper() for h in re.findall(r"#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{3}\b", t)}  # noqa: E731
+    rg = lambda t: {re.sub(r"\s+", "", x) for x in re.findall(r"rgba\([^)]*\)", t)}  # noqa: E731
+    try:
+        design = open(DESIGN_MD, encoding="utf-8").read()
+    except OSError as e:
+        return {"error": "DESIGN.md 없음: %s" % e}
     js = open(os.path.join(DOCS, "assets", "app.js"), encoding="utf-8").read()
-    return {"new_hex_css": sorted(hx(cur) - hx(base)), "hex_in_js": sorted(hx(js)),
-            "rgba_new": sorted(set(re.findall(r"rgba\([^)]*\)", cur)) - set(re.findall(r"rgba\([^)]*\)", base)))}
+    return {"new_hex_css": sorted(hx(cur) - hx(design)), "hex_in_js": sorted(hx(js)),
+            "rgba_new": sorted(rg(cur) - rg(design) - rg(base)),
+            "new_hex_vs_main": sorted(hx(cur) - hx(base)), "basis": "DESIGN.md token set"}
 
 
 def tabbar(pg):
@@ -411,7 +422,8 @@ def main():
         "tabbar": {k: {x: v["tabbar"][x] for x in ("bar_card", "on", "off", "ok")}
                    for k, v in res["prespec_checks"].items() if "tabbar" in v},
         "new_hex_css": res["hex"].get("new_hex_css"), "hex_in_js": res["hex"].get("hex_in_js"),
-        "rgba_new": res["hex"].get("rgba_new"),
+        "rgba_new": res["hex"].get("rgba_new"), "hex_basis": res["hex"].get("basis"),
+        "new_hex_vs_main(참고)": res["hex"].get("new_hex_vs_main"),
     })
     json.dump(res, open(os.path.join(a.out, a.prefix + "verify.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(json.dumps(res["checks"], ensure_ascii=False, indent=1))
